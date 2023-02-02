@@ -2,13 +2,12 @@
 let mongo = require("mongodb");
 //Prelevo la parte del modulo per la gestione del client mongo
 let mongoClient = mongo.MongoClient;
-let  urlServerMongoDb = "mongodb://localhost:27017/";
-
+let  urlServerMongoDb = "mongodb://127.0.0.1:27017";
 
 let http = require("http");
 let url = require("url");
 
-let database = "5AInf_2";
+let database = "banche";
 
 //DEFINISCO IL SERVER
 let json, op;
@@ -19,106 +18,82 @@ let server = http.createServer(function(req, res){
     //Decodifico la richiesta ed eseguo la query interessata
     let scelta = (url.parse(req.url)).pathname;
     switch(scelta){
+        
         case "/q1":
-            find(res, "persone", {nome:/^L/},{});
+            find(res, "utenti", {residenza:"Fossano"});
+            break;
+        
+        case "/q2":
+            find(res, "utenti", {nome:/^[CL]/, anni:{$gt:50}});
             break;
 
-        case "/q2":
-            find(res, "voti", {},{});
-        break;
-
         case "/q3":
-            find(res, "voti", {codP:4},{voto:1});
-        break;
-
+            find(res, "utenti", {nome:/o$/}, {nome:1, cognome:1, _id:0}, 2);
+            break;
+        
         case "/q4":
-            remove(res, "persone", {});
-        break;
+            op = [
+                {$group: {_id:"$residenza", etaMedia: {$avg: "$anni"}}},
+            ]
+            aggregate(res, "utenti", op)
+            break;
 
-        //Dato il nome di una persona ritornare i suoi voti
         case "/q5":
-            let persona = "Leopoldo";
-            find2(res, "persone", {nome:persona}, {_id:1}, function(ris){
-                //res.end(JSON.stringify(ris));
-                //Prendere il codice
-                console.log(ris); //ARRAY
-                let id = ris[0]._id; 
-                console.log(id);
-                console.log({codP:id});
-
-                //Effettuare la seconda query
-                //RICORDARSI CHE è PUNTIGLIOSO SUI TIPI
-                find2(res, "voti", {codP:parseInt(id)}, {codP:0}, function(ris){
-                    /*for(let i in ris){
-                        ris[i].persona = persona;
-                    }*/
-                    /*for(let item of ris){
-                        item.persona = persona;
-                    }*/
-                    ris.forEach(element => {
-                        element.persona = persona;
-                    });
-
-                    res.end(JSON.stringify(ris));
-                });
-            });
+            find2(res, "utenti", {nome:"Rosanna", cognome:"Gelso"}, {_id:1}, function(ris){
+                console.log(ris[0]._id);
+                find(res, "transazioni", {mittente:ris[0]._id}, {mittente:1, destinatario:1, somma:1});
+            })
             break;
 
         case "/q6":
-            /* L'ordine delle funzione è fondamentale */
-            op = [
-                {$match:{nome:/o$/}}, //FIND / WHERE
-                {$project:{_id:0}},//SELECT
-                {$limit:2},  
-                {$sort:{nome:1}}, //Se metto sort prima di limit ci sarebbe Giancarlo come primo
-                /*
-                    group:{ indico tutti gli attributi 
-                        che verranno calcolati e 
-                        visualizzati}
-                */
-                {$group:{_id:{}, contPersone:{$sum:1}}},
-                {$project:{_id:0}}
-            ];
-            aggregate(res, "persone", op);
+            cont(res, "transazioni", {somma:{$gt:20}});
             break;
 
         case "/q7":
-            /* L'ordine delle funzione è fondamentale */
+            find2(res, "utenti", {nome:"Mattia", cognome:"Manzo"}, {}, function(ris){
+                console.log(ris)
+                op = [
+                    {$match: {destinatario:ris[0]._id}},
+                    {
+                        $lookup: {
+                           from: "utenti",
+                           localField: "destinatario",
+                           foreignField: "_id",
+                           as: "region_docs"
+                        }
+                    },
+                    {
+                        $unwind: "$region_docs"
+                    },
+                    {$group: {_id:"$region_docs.nome", sommatoria: {$sum: "$somma"}}},
+                ]
+                aggregate(res, "transazioni", op)
+                
+            })
+
+            break;
+
+        case "/q8":
             op = [
-                {$group:{_id:{persona:"$codP"}, contVoti:{$sum:1}}}
-            ];
-            aggregate(res, "voti", op);
+                {
+                    $lookup: {
+                       from: "utenti",
+                       localField: "destinatario",
+                       foreignField: "_id",
+                       as: "region_docs"
+                    }
+                },
+                {
+                    $unwind: "$region_docs"
+                },
+                {$group: {_id:"$region_docs.nome", sommatoria: {$sum: "$somma"}}},
+            ]
+            aggregate(res, "transazioni", op)
             break;
 
-        case "/i1":
-            insertMany(res, "persone", 
-            [
-                {_id:"1", nome:"Francesca"},
-                {_id:"2", nome:"Leonardo"},
-                {_id:"3", nome:"Jessica"},
-                {_id:"4", nome:"Leopoldo"},
-                {_id:"5", nome:"Giancarlo"},
-                {_id:"6", nome:"Renata"},
-                {_id:"7", nome:"Giuseppe"}
-            ]
-            ,{});
-            break;
-
-        case "/i2":
-            insertMany(res, "voti", 
-            [
-                { codP:1, voto:10},
-                { codP:2, voto:7},
-                { codP:3, voto:3},
-                { codP:4, voto:4},
-                { codP:4, voto:3},
-                { codP:5, voto:5},
-                { codP:6, voto:6},
-                { codP:7, voto:7},
-                { codP:7, voto:4},
-                { codP:7, voto:5}
-            ]
-            ,{});
+        case "/q9":
+            let data = new Date("2021-01-01");
+            find(res, "transazioni", {data:{$gt:data}}, {_id:0})
             break;
         
         default:
@@ -175,7 +150,6 @@ function find(res, col, obj, select){
         });
     });
 }
-
 /*
     aggregate -> aggregazione di funzioni di ricerca
 
